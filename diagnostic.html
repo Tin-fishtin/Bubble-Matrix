@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diagnostic</title>
+</head>
+<body style="background:#ffffff; color:#000000; font-family:Helvetica, Arial, sans-serif; font-size:14px; padding:16px; margin:0;">
+
+<div id="out" style="white-space:pre-wrap; line-height:1.6;">Loading diagnostic...</div>
+<button id="camBtn" style="margin-top:16px; padding:14px 20px; font-size:14px;">Tap to test camera</button>
+<canvas id="cv" width="120" height="120" style="border:1px solid #000; margin-top:16px; display:block;"></canvas>
+
+<script>
+// Deliberately written in plain old-style JavaScript (var, function),
+// no arrow functions, no let/const, no template literals — so that if
+// something even THIS conservative fails to run, we know it's not about
+// modern JS syntax at all.
+
+var lines = [];
+
+function log(msg) {
+  lines.push(msg);
+  document.getElementById('out').textContent = lines.join('\n');
+}
+
+log('If you can read this line, basic JavaScript is running fine.');
+log('');
+log('User agent:');
+log(navigator.userAgent);
+log('');
+log('Page protocol: ' + window.location.protocol);
+log('Page URL: ' + window.location.href);
+log('');
+
+// Test: fetch API
+if (typeof fetch === 'function') {
+  log('fetch API: available');
+} else {
+  log('fetch API: NOT available');
+}
+
+// Test: canvas
+try {
+  var cv = document.getElementById('cv');
+  var ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ff5500';
+  ctx.fillRect(10, 10, 100, 100);
+  log('Canvas 2D: working (you should see an orange square below)');
+} catch (e) {
+  log('Canvas 2D: FAILED - ' + e.message);
+}
+
+// Test: secure context / mediaDevices existence
+if (window.isSecureContext === true) {
+  log('Secure context: YES');
+} else if (window.isSecureContext === false) {
+  log('Secure context: NO (this blocks camera access)');
+} else {
+  log('Secure context: unknown (isSecureContext not supported)');
+}
+
+if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+  log('navigator.mediaDevices.getUserMedia: available');
+} else {
+  log('navigator.mediaDevices.getUserMedia: NOT available');
+}
+
+log('');
+log('Tap the button below to test the camera specifically.');
+
+document.getElementById('camBtn').addEventListener('click', function () {
+  log('Camera test: requesting access...');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    log('Camera test: FAILED - getUserMedia is not available on this page.');
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+    .then(function (stream) {
+      log('Camera test: SUCCESS - camera access granted.');
+      stream.getTracks().forEach(function (tr) { tr.stop(); });
+    })
+    .catch(function (err) {
+      log('Camera test: FAILED - ' + err.name + ': ' + err.message);
+    });
+});
+</script>
+
+</body>
+</html>

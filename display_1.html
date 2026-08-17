@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bubble Matrix — Display</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    background: #0a0a0a;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  #canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    background: #000;
+    touch-action: none;
+  }
+
+  /* One-time "tap to start" overlay. iOS requires camera access to be
+     kicked off from a real tap on THIS device — it can't be triggered
+     remotely from the control laptop. Shown until camera is live. */
+  #startOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    text-align: center;
+    padding: 24px;
+  }
+  #startOverlay.hidden { display: none; }
+  #startBtn {
+    background: #1c1c1c;
+    border: 1px solid #ffb84d;
+    color: #ffb84d;
+    padding: 16px 28px;
+    border-radius: 8px;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+  }
+  #startStatus { color: #8a8a85; font-size: 12px; max-width: 320px; line-height: 1.5; }
+
+  /* Tiny always-present recall zone: tap 5x to bring the start overlay
+     back if the camera ever needs to be re-granted after a reload */
+  #recallZone {
+    position: fixed;
+    top: 0; left: 0;
+    width: 70px; height: 70px;
+    z-index: 40;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<div id="recallZone"></div>
+
+<div id="startOverlay">
+  <button id="startBtn">Tap to start camera</button>
+  <div id="startStatus">This only needs to be tapped once per reload — after that the display runs on its own.</div>
+</div>
+
+<video id="camVideo" autoplay playsinline muted style="position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; overflow:hidden; top:0; left:0;"></video>
+
+<!-- No Firebase SDK here on purpose — Firebase's JS library requires modern
+     browser features and isn't guaranteed to run on iOS 12 (iPhone 6's
+     ceiling). We talk to the Realtime Database's plain REST API instead,
+     using nothing but fetch(), which iOS 12 supports fine. -->
+<script>
+// =========================================================================
+// PASTE YOUR DATABASE URL HERE — the "databaseURL" field from your Firebase
+// config, e.g. "https://your-project-default-rtdb.firebaseio.com"
+// (no trailing slash)
+// =========================================================================
+const FIREBASE_DB_URL = "https://bubble-matrix-default-rtdb.firebaseio.com/";
+
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const camVideo = document.getElementById('camVideo');
+
+// ---------- Defaults (used until/unless Firebase has something) ----------
+let displayMode = 'camera';
+let diameter = 70, spacingX = 80, spacingY = 72, rowStagger = 0.5, offsetX = 0, offsetY = 0;
+let mirrorCols = true, mirrorRows = false, camFacing = 'environment';
+let colorMode = 'solid', colorA = '#ffb84d', colorB = '#4da3ff', pulseSpeed = 60;
+let glowEnabled = false, glowMode = 'single', glowColor = '#ffb84d', glowStrength = 18, rainbowSeed = 0;
+let overlayOn = true, bgMode = 'solid', bgColorA = '#000000', bgColorB = '#1a1a2e', bgSpeed = 60;
+let t = 0, lastTime = performance.now();
+let camActive = false, camStream = null;
+
+function applySettings(s) {
+  if (!s) return;
+  if (s.displayMode) displayMode = s.displayMode;
+  if (typeof s.diameter === 'number') diameter = s.diameter;
+  if (typeof s.spacingX === 'number') spacingX = s.spacingX;
+  if (typeof s.spacingY === 'number') spacingY = s.spacingY;
+  if (typeof s.rowStagger === 'number') rowStagger = s.rowStagger;
+  if (typeof s.offsetX === 'number') offsetX = s.offsetX;
+  if (typeof s.offsetY === 'number') offsetY = s.offsetY;
+  if (typeof s.mirrorCols === 'boolean') mirrorCols = s.mirrorCols;
+  if (typeof s.mirrorRows === 'boolean') mirrorRows = s.mirrorRows;
+  if (s.colorMode) colorMode = s.colorMode;
+  if (s.colorA) colorA = s.colorA;
+  if (s.colorB) colorB = s.colorB;
+  if (typeof s.pulseSpeed === 'number') pulseSpeed = s.pulseSpeed;
+  if (typeof s.glowEnabled === 'boolean') glowEnabled = s.glowEnabled;
+  if (s.glowMode) glowMode = s.glowMode;
+  if (s.glowColor) glowColor = s.glowColor;
+  if (typeof s.glowStrength === 'number') glowStrength = s.glowStrength;
+  if (typeof s.rainbowSeed === 'number') rainbowSeed = s.rainbowSeed;
+  if (typeof s.overlayOn === 'boolean') overlayOn = s.overlayOn;
+  if (s.bgMode) bgMode = s.bgMode;
+  if (s.bgColorA) bgColorA = s.bgColorA;
+  if (s.bgColorB) bgColorB = s.bgColorB;
+  if (typeof s.bgSpeed === 'number') bgSpeed = s.bgSpeed;
+
+  // camFacing changing means we need to restart the stream with the new
+  // facing mode — but only if the camera is already running.
+  if (s.camFacing && s.camFacing !== camFacing) {
+    camFacing = s.camFacing;
+    if (camActive) startCamera();
+  }
+}
+
+async function pollSettings() {
+  try {
+    const res = await fetch(FIREBASE_DB_URL + '/bubbleMatrix/settings.json');
+    const s = await res.json();
+    applySettings(s);
+  } catch (err) {
+    // network hiccup — just keep whatever settings we already have and try again next tick
+  }
+}
+pollSettings();
+setInterval(pollSettings, 800);
+
+// ---------- Camera ----------
+async function startCamera() {
+  try {
+    if (camStream) camStream.getTracks().forEach(tr => tr.stop());
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: camFacing },
+      audio: false
+    });
+    camVideo.srcObject = camStream;
+    await camVideo.play();
+    camActive = true;
+    document.getElementById('startOverlay').classList.add('hidden');
+    reportStatus();
+  } catch (err) {
+    camActive = false;
+    document.getElementById('startStatus').textContent =
+      'Could not access camera (' + err.message + '). Make sure this page was opened via its https:// URL directly in Safari.';
+    reportStatus();
+  }
+}
+document.getElementById('startBtn').addEventListener('click', startCamera);
+
+function reportStatus() {
+  fetch(FIREBASE_DB_URL + '/bubbleMatrix/status.json', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      camActive,
+      cssWidth: window.innerWidth,
+      cssHeight: window.innerHeight,
+      dpr: window.devicePixelRatio || 1,
+      lastSeen: Date.now()
+    })
+  }).catch(() => { /* network hiccup — ignore, next heartbeat will retry */ });
+}
+setInterval(reportStatus, 15000); // heartbeat so the control page can show "last seen"
+
+// Recall zone: tap 5x top-left to bring the start overlay back
+let tapCount = 0, tapTimer = null;
+document.getElementById('recallZone').addEventListener('click', () => {
+  tapCount++;
+  if (tapTimer) clearTimeout(tapTimer);
+  tapTimer = setTimeout(() => { tapCount = 0; }, 3000);
+  if (tapCount >= 5) {
+    tapCount = 0;
+    document.getElementById('startOverlay').classList.remove('hidden');
+  }
+});
+
+// ---------- Sizing ----------
+function resize() {
+  const dpr = 2;
+  canvas.width = Math.round(window.innerWidth * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  reportStatus();
+}
+window.addEventListener('resize', resize);
+
+// ---------- Deterministic per-cell randomness ----------
+function hash2(a, b) {
+  const n = Math.sin(a * 127.1 + b * 311.7 + rainbowSeed * 0.017) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function hexOrNamedToRgb(color) {
+  if (color.charAt(0) === '#') {
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
+    return `${r},${g},${b}`;
+  }
+  return '255,184,77';
+}
+
+// ---------- Grid computation ----------
+function computeGrid(cssW, cssH) {
+  const cells = [];
+  const pad = diameter;
+  const rowStart = Math.floor((-pad - offsetY) / spacingY) - 1;
+  const rowEnd = Math.ceil((cssH + pad - offsetY) / spacingY) + 1;
+  for (let row = rowStart; row <= rowEnd; row++) {
+    const stagger = (((row % 2) + 2) % 2 === 1) ? rowStagger * spacingX : 0;
+    const colStart = Math.floor((-pad - offsetX - stagger) / spacingX) - 1;
+    const colEnd = Math.ceil((cssW + pad - offsetX - stagger) / spacingX) + 1;
+    for (let col = colStart; col <= colEnd; col++) {
+      const cx = col * spacingX + stagger + offsetX;
+      const cy = row * spacingY + offsetY;
+      if (cx > -diameter && cx < cssW + diameter && cy > -diameter && cy < cssH + diameter) {
+        cells.push({ col, row, cx, cy });
+      }
+    }
+  }
+  return cells;
+}
+
+function lerpRgb(rgbA, rgbB, mixT) {
+  const a = rgbA.split(',').map(Number);
+  const b = rgbB.split(',').map(Number);
+  const r = Math.round(a[0] + (b[0] - a[0]) * mixT);
+  const g = Math.round(a[1] + (b[1] - a[1]) * mixT);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * mixT);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function drawBackground(cssW, cssH) {
+  if (bgMode === 'solid') {
+    ctx.fillStyle = bgColorA;
+    ctx.fillRect(0, 0, cssW, cssH);
+    return;
+  }
+  const speedFactor = bgSpeed / 60;
+  const rgbA = hexOrNamedToRgb(bgColorA);
+  const rgbB = hexOrNamedToRgb(bgColorB);
+  if (bgMode === 'pulse') {
+    const mixT = 0.5 + 0.5 * Math.sin(t * speedFactor);
+    ctx.fillStyle = lerpRgb(rgbA, rgbB, mixT);
+    ctx.fillRect(0, 0, cssW, cssH);
+    return;
+  }
+  const blockSize = 48;
+  const cols = Math.ceil(cssW / blockSize) + 1;
+  const rows = Math.ceil(cssH / blockSize) + 1;
+  for (let by = 0; by < rows; by++) {
+    for (let bx = 0; bx < cols; bx++) {
+      const px = bx * blockSize, py = by * blockSize;
+      let mixT;
+      if (bgMode === 'wave') {
+        mixT = 0.5 + 0.5 * Math.sin((px / cssW) * 6 - t * speedFactor * 1.2);
+      } else {
+        const dx = (px / cssW) - 0.5, dy = (py / cssH) - 0.5;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        mixT = 0.5 + 0.5 * Math.sin(dist * 16 - t * speedFactor * 2.4);
+      }
+      ctx.fillStyle = lerpRgb(rgbA, rgbB, mixT);
+      ctx.fillRect(px, py, blockSize + 1, blockSize + 1);
+    }
+  }
+}
+
+// ---------- Drawing ----------
+function render() {
+  const dpr = 2;
+  const cssW = window.innerWidth;
+  const cssH = window.innerHeight;
+
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  drawBackground(cssW, cssH);
+
+  const radius = diameter / 2;
+  const cells = computeGrid(cssW, cssH);
+
+  const vw = camVideo.videoWidth;
+  const vh = camVideo.videoHeight;
+  const camReady = displayMode === 'camera' && camActive && vw > 0 && vh > 0;
+  let srcSize, srcOffX, srcOffY;
+  if (camReady) {
+    srcSize = Math.min(vw, vh);
+    srcOffX = (vw - srcSize) / 2;
+    srcOffY = (vh - srcSize) / 2;
+  }
+
+  function glowColorFor(col, row) {
+    if (glowMode === 'rainbow') {
+      const hue = Math.floor(hash2(col, row) * 360);
+      return `hsl(${hue}, 90%, 62%)`;
+    }
+    return glowColor;
+  }
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    const cx = cell.cx, cy = cell.cy, col = cell.col, row = cell.row;
+
+    if (displayMode === 'camera') {
+      if (camReady) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.translate(cx, cy);
+        const baseFlip = (camFacing === 'user') ? -1 : 1;
+        const colFlip = (mirrorCols && (((col % 2) + 2) % 2 === 1)) ? -1 : 1;
+        const rowFlip = (mirrorRows && (((row % 2) + 2) % 2 === 1)) ? -1 : 1;
+        ctx.scale(baseFlip * colFlip, rowFlip);
+        ctx.drawImage(camVideo, srcOffX, srcOffY, srcSize, srcSize, -radius, -radius, radius * 2, radius * 2);
+        ctx.restore();
+
+        const vign = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius);
+        vign.addColorStop(0, 'rgba(0,0,0,0)');
+        vign.addColorStop(1, 'rgba(0,0,0,0.35)');
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = vign;
+        ctx.fill();
+      } else {
+        const phase = (col * 0.4) - t * 1.4 + row * 0.3;
+        const b = Math.max(0, Math.sin(phase)) * 0.12;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,255,255,${b})`;
+        ctx.fill();
+      }
+    } else {
+      let fillColor = colorA;
+      let alpha = 1;
+      const speedFactor = pulseSpeed / 60;
+      if (colorMode === 'alternating') {
+        const alt = ((col + row) % 2 + 2) % 2;
+        fillColor = alt === 0 ? colorA : colorB;
+      } else if (colorMode === 'wave') {
+        const phase = (cx / cssW) * 6 - t * speedFactor * 1.2;
+        alpha = 0.15 + 0.85 * Math.max(0, Math.sin(phase));
+      } else if (colorMode === 'ripple') {
+        const dx = (cx / cssW) - 0.5, dy = (cy / cssH) - 0.5;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const phase = dist * 16 - t * speedFactor * 2.4;
+        alpha = Math.max(0, 0.15 + 0.85 * Math.max(0, Math.sin(phase)) * (1 - dist * 0.7));
+      } else if (colorMode === 'pulse') {
+        const hue = Math.floor(hash2(col, row) * 360);
+        fillColor = `hsl(${hue}, 85%, 58%)`;
+        const phase = hash2(col + 41, row + 7) * Math.PI * 2;
+        const speedMul = 0.5 + hash2(col + 91, row + 17) * 1.2;
+        alpha = 0.25 + 0.75 * Math.max(0, Math.sin(t * speedFactor * speedMul + phase));
+      }
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fillStyle = fillColor;
+      ctx.globalAlpha = alpha;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    if (!glowEnabled) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 1.01, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  if (glowEnabled) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const outerR = radius + Math.min(glowStrength, radius * 1.4);
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i];
+      const gColor = glowColorFor(cell.col, cell.row);
+      const rgb = hexOrNamedToRgb(gColor);
+      const grad = ctx.createRadialGradient(cell.cx, cell.cy, radius * 0.88, cell.cx, cell.cy, outerR);
+      grad.addColorStop(0, `rgba(${rgb},0)`);
+      grad.addColorStop(0.28, `rgba(${rgb},0.95)`);
+      grad.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.beginPath();
+      ctx.arc(cell.cx, cell.cy, outerR, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cell.cx, cell.cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${rgb},0.9)`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (overlayOn) {
+    const sheen = ctx.createLinearGradient(0, 0, cssW, cssH);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.05)');
+    sheen.addColorStop(0.5, 'rgba(255,255,255,0.00)');
+    sheen.addColorStop(1, 'rgba(255,255,255,0.04)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(0, 0, cssW, cssH);
+  }
+
+  ctx.restore();
+}
+
+function loop(now) {
+  const dt = (now - lastTime) / 1000;
+  lastTime = now;
+  t += dt;
+  render();
+  requestAnimationFrame(loop);
+}
+
+resize();
+requestAnimationFrame(loop);
+reportStatus();
+</script>
+</body>
+</html>

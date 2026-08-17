@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bubble Matrix — Control</title>
+<style>
+  :root {
+    --bg: #0a0a0a; --panel: #141414; --line: #2f2f2f;
+    --ink: #e8e6e0; --dim: #8a8a85; --accent: #ffb84d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+  #wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 60px; }
+  .title { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+  .title h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); margin: 0; }
+  #statusLine { color: var(--dim); font-size: 12px; margin-bottom: 16px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  #statusLine .ok { color: #6ee06e; }
+  #statusLine .bad { color: #e06e6e; }
+
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tabBtn { flex: 1; min-width: 70px; text-align: center; background: #1c1c1c; border: 1px solid var(--line); color: var(--dim);
+    padding: 9px 4px; border-radius: 6px; font-size: 11px; }
+  .tabBtn.active { background: #2a2013; border-color: var(--accent); color: var(--accent); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .row { display: flex; align-items: center; margin-bottom: 10px; gap: 10px; }
+  .row label { width: 120px; flex: 0 0 120px; color: var(--dim); font-size: 12px; }
+  .row input[type="range"] { flex: 1; }
+  .row output { width: 50px; flex: 0 0 50px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+  input[type="range"] { -webkit-appearance: none; width: 100%; height: 3px; background: var(--line); border-radius: 2px; outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); cursor: pointer; margin-top: -7.5px; }
+  input[type="range"]::-webkit-slider-runnable-track { height: 3px; background: var(--line); border-radius: 2px; }
+
+  .section-label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .section-label:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+
+  button.btn { background: #1c1c1c; border: 1px solid var(--line); color: var(--accent); padding: 11px; border-radius: 6px; font-size: 12px; }
+  button.btn.dim { color: var(--dim); }
+  .btnRow { display: flex; gap: 8px; margin-top: 4px; }
+  .btnRow button { flex: 1; }
+  .hint { color: var(--dim); font-size: 11px; margin-top: 6px; line-height: 1.4; }
+
+  .toggleRow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .toggleRow:first-of-type { border-top: none; }
+  .toggleRow label { color: var(--dim); font-size: 12px; flex: 1; }
+  .toggle { width: 40px; height: 24px; background: #1c1c1c; border: 1px solid var(--line); border-radius: 12px; position: relative; flex-shrink: 0; }
+  .toggle::after { content: ""; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--dim); top: 2px; left: 2px; transition: transform .15s, background .15s; }
+  .toggle.on { border-color: var(--accent); }
+  .toggle.on::after { background: var(--accent); transform: translateX(16px); }
+
+  input[type="color"] { -webkit-appearance: none; width: 40px; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: none; padding: 0; }
+  input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+  input[type="color"]::-webkit-color-swatch { border-radius: 4px; border: none; }
+  .colorModeGrid { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .colorModeGrid .tabBtn { flex: 1; }
+  select { background: #1c1c1c; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; flex: 1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div class="title"><h1>Bubble Matrix — Control</h1></div>
+  <div id="statusLine">Connecting…</div>
+
+  <div class="tabs">
+    <div class="tabBtn active" data-tab="source">Source</div>
+    <div class="tabBtn" data-tab="grid">Grid</div>
+    <div class="tabBtn" data-tab="color">Color</div>
+    <div class="tabBtn" data-tab="background">Background</div>
+    <div class="tabBtn" data-tab="glow">Glow</div>
+    <div class="tabBtn" data-tab="finish">Finish</div>
+  </div>
+
+  <!-- SOURCE -->
+  <div class="panel active" data-panel="source">
+    <div class="row">
+      <label>Display mode</label>
+      <select id="displayMode">
+        <option value="camera">Live camera</option>
+        <option value="color">Color pattern</option>
+      </select>
+    </div>
+    <div class="btnRow">
+      <button class="btn dim" id="camFlip">Flip camera (front/back)</button>
+    </div>
+    <div class="hint">The display's camera must be started once by tapping the screen directly on the iPhone — that can't be triggered remotely (iOS requires an on-device tap). This flip button works remotely once it's running.</div>
+    <div class="toggleRow" style="margin-top:12px;">
+      <label>Mirror alternating columns</label>
+      <div class="toggle on" id="mirrorColsBtn"></div>
+    </div>
+    <div class="toggleRow">
+      <label>Mirror alternating rows too</label>
+      <div class="toggle" id="mirrorRowsBtn"></div>
+    </div>
+  </div>
+
+  <!-- GRID -->
+  <div class="panel" data-panel="grid">
+    <div class="section-label">Bubble</div>
+    <div class="row"><label for="diameter">Diameter</label><input type="range" id="diameter" min="10" max="260" value="70" step="1"><output id="diameterOut">70px</output></div>
+    <div class="section-label">Spacing (center to center)</div>
+    <div class="row"><label for="spacingX">Horizontal</label><input type="range" id="spacingX" min="10" max="300" value="80" step="1"><output id="spacingXOut">80px</output></div>
+    <div class="row"><label for="spacingY">Vertical</label><input type="range" id="spacingY" min="10" max="300" value="72" step="1"><output id="spacingYOut">72px</output></div>
+    <div class="row"><label for="rowStagger">Row offset</label><input type="range" id="rowStagger" min="0" max="1" value="0.5" step="0.05"><output id="rowStaggerOut">0.5</output></div>
+    <div class="section-label">Position</div>
+    <div class="row"><label for="offsetX">Shift left/right</label><input type="range" id="offsetX" min="-300" max="300" value="0" step="1"><output id="offsetXOut">0</output></div>
+    <div class="row"><label for="offsetY">Shift up/down</label><input type="range" id="offsetY" min="-300" max="300" value="0" step="1"><output id="offsetYOut">0</output></div>
+    <div class="btnRow"><button class="btn dim" id="resetOffsetBtn">Center grid</button></div>
+
+    <div class="section-label">Calculate from real bubble wrap (optional)</div>
+    <div id="displayScreenInfo" class="hint" style="margin-bottom:8px;">Display screen size: not reported yet.</div>
+    <div class="row"><label for="realScreenW">Screen width</label><input type="range" id="realScreenW" min="4" max="30" value="15.6" step="0.1"><output id="realScreenWOut">15.6"</output></div>
+    <div class="row"><label for="realBubbleD">Bubble diameter</label><input type="range" id="realBubbleD" min="0.25" max="2.5" value="1.25" step="0.05"><output id="realBubbleDOut">1.25"</output></div>
+    <div class="btnRow"><button class="btn" id="applyCalcBtn">Apply suggested size &amp; spacing</button></div>
+    <div class="hint">Uses the iPhone's actual reported screen width in CSS pixels, so the math matches the real display, not this laptop's screen.</div>
+  </div>
+
+  <!-- COLOR -->
+  <div class="panel" data-panel="color">
+    <div class="colorModeGrid">
+      <div class="tabBtn active" data-colormode="solid">Solid</div>
+      <div class="tabBtn" data-colormode="alternating">Alternating</div>
+      <div class="tabBtn" data-colormode="wave">Wave</div>
+      <div class="tabBtn" data-colormode="ripple">Ripple</div>
+      <div class="tabBtn" data-colormode="pulse">Rainbow pulse</div>
+    </div>
+    <div class="row" id="colorARow"><label>Color A</label><input type="color" id="colorA" value="#ffb84d"></div>
+    <div class="row" id="colorBRow" style="display:none;"><label>Color B</label><input type="color" id="colorB" value="#4da3ff"></div>
+    <div class="row" id="pulseSpeedRow" style="display:none;"><label for="pulseSpeed">Animation speed</label><input type="range" id="pulseSpeed" min="10" max="200" value="60" step="5"><output id="pulseSpeedOut">60</output></div>
+    <div class="btnRow" id="shuffleRainbowRow" style="display:none;"><button class="btn dim" id="shuffleRainbowBtn">Shuffle rainbow colors</button></div>
+    <div class="hint">Only applies when Display mode is set to "Color pattern" under Source.</div>
+  </div>
+
+  <!-- BACKGROUND -->
+  <div class="panel" data-panel="background">
+    <div class="colorModeGrid">
+      <div class="tabBtn active" data-bgmode="solid">Solid</div>
+      <div class="tabBtn" data-bgmode="wave">Wave</div>
+      <div class="tabBtn" data-bgmode="ripple">Ripple</div>
+      <div class="tabBtn" data-bgmode="pulse">Pulse</div>
+    </div>
+    <div class="row"><label>Color A</label><input type="color" id="bgColorA" value="#000000"></div>
+    <div class="row" id="bgColorBRow" style="display:none;"><label>Color B</label><input type="color" id="bgColorB" value="#1a1a2e"></div>
+    <div class="row" id="bgSpeedRow" style="display:none;"><label for="bgSpeed">Animation speed</label><input type="range" id="bgSpeed" min="10" max="200" value="60" step="5"><output id="bgSpeedOut">60</output></div>
+    <div class="hint">The color showing through the gaps behind the bubbles.</div>
+  </div>
+
+  <!-- GLOW -->
+  <div class="panel" data-panel="glow">
+    <div class="toggleRow" style="border-top:none;"><label>Glowing border on each bubble</label><div class="toggle" id="glowEnabledBtn"></div></div>
+    <div class="row" style="margin-top:10px;">
+      <label>Glow style</label>
+      <select id="glowMode">
+        <option value="single">Single color</option>
+        <option value="rainbow">Different per bubble</option>
+      </select>
+    </div>
+    <div class="row" id="glowColorRow"><label>Glow color</label><input type="color" id="glowColor" value="#ffb84d"></div>
+    <div class="btnRow" id="shuffleRow" style="display:none;"><button class="btn dim" id="shuffleColorsBtn">Shuffle colors</button></div>
+    <div class="row" style="margin-top:6px;"><label for="glowStrength">Glow strength</label><input type="range" id="glowStrength" min="4" max="60" value="18" step="1"><output id="glowStrengthOut">18</output></div>
+  </div>
+
+  <!-- FINISH -->
+  <div class="panel" data-panel="finish">
+    <div class="toggleRow" style="border-top:none;"><label>Simulate bubble wrap sheen</label><div class="toggle on" id="overlayBtn"></div></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script>
+// =========================================================================
+// PASTE YOUR FIREBASE CONFIG HERE — same object goes in display.html too.
+// =========================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyBmH9Gxq7RW-O-tcfU3TeXoHlD6_vEom-w",
+  authDomain: "bubble-matrix.firebaseapp.com",
+  projectId: "bubble-matrix",
+  storageBucket: "bubble-matrix.firebasestorage.app",
+  messagingSenderId: "965325185020",
+  appId: "1:965325185020:web:43d82708106fa1e4a9dc79"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const settingsRef = db.ref('bubbleMatrix/settings');
+const statusRef = db.ref('bubbleMatrix/status');
+
+let rainbowSeed = Math.random() * 1000;
+let displayScreenCssW = null;
+
+// Push a partial update — merges into whatever's already stored.
+function push(partial) {
+  settingsRef.update(partial);
+}
+
+// ---------- Status readout ----------
+statusRef.on('value', snap => {
+  const s = snap.val();
+  const el = document.getElementById('statusLine');
+  if (!s || !s.lastSeen) {
+    el.innerHTML = '<span class="bad">●</span> No display has reported in yet.';
+    return;
+  }
+  const secsAgo = (Date.now() - s.lastSeen) / 1000;
+  const fresh = secsAgo < 30;
+  el.innerHTML = (fresh ? '<span class="ok">●</span> Display connected' : '<span class="bad">●</span> Display last seen ' + Math.round(secsAgo) + 's ago')
+    + (s.camActive ? ' — camera live' : ' — camera not started on device');
+  if (s.cssWidth) {
+    displayScreenCssW = s.cssWidth;
+    document.getElementById('displayScreenInfo').textContent =
+      `Display screen size: ${s.cssWidth} × ${s.cssHeight} CSS px (reported ${Math.round(secsAgo)}s ago)`;
+  }
+});
+
+// ---------- Load current settings once, then keep UI in sync ----------
+function reflectToUI(s) {
+  if (!s) return;
+  if (s.displayMode) document.getElementById('displayMode').value = s.displayMode;
+  if (typeof s.diameter === 'number') document.getElementById('diameter').value = s.diameter;
+  if (typeof s.spacingX === 'number') document.getElementById('spacingX').value = s.spacingX;
+  if (typeof s.spacingY === 'number') document.getElementById('spacingY').value = s.spacingY;
+  if (typeof s.rowStagger === 'number') document.getElementById('rowStagger').value = s.rowStagger;
+  if (typeof s.offsetX === 'number') document.getElementById('offsetX').value = s.offsetX;
+  if (typeof s.offsetY === 'number') document.getElementById('offsetY').value = s.offsetY;
+  if (typeof s.mirrorCols === 'boolean') document.getElementById('mirrorColsBtn').classList.toggle('on', s.mirrorCols);
+  if (typeof s.mirrorRows === 'boolean') document.getElementById('mirrorRowsBtn').classList.toggle('on', s.mirrorRows);
+  if (s.colorA) document.getElementById('colorA').value = s.colorA;
+  if (s.colorB) document.getElementById('colorB').value = s.colorB;
+  if (typeof s.pulseSpeed === 'number') document.getElementById('pulseSpeed').value = s.pulseSpeed;
+  if (typeof s.glowEnabled === 'boolean') document.getElementById('glowEnabledBtn').classList.toggle('on', s.glowEnabled);
+  if (s.glowMode) document.getElementById('glowMode').value = s.glowMode;
+  if (s.glowColor) document.getElementById('glowColor').value = s.glowColor;
+  if (typeof s.glowStrength === 'number') document.getElementById('glowStrength').value = s.glowStrength;
+  if (typeof s.overlayOn === 'boolean') document.getElementById('overlayBtn').classList.toggle('on', s.overlayOn);
+  if (s.bgColorA) document.getElementById('bgColorA').value = s.bgColorA;
+  if (s.bgColorB) document.getElementById('bgColorB').value = s.bgColorB;
+  if (typeof s.bgSpeed === 'number') document.getElementById('bgSpeed').value = s.bgSpeed;
+  if (s.colorMode) {
+    document.querySelectorAll('[data-colormode]').forEach(b => b.classList.toggle('active', b.dataset.colormode === s.colorMode));
+    updateColorModeUI(s.colorMode);
+  }
+  if (s.bgMode) {
+    document.querySelectorAll('[data-bgmode]').forEach(b => b.classList.toggle('active', b.dataset.bgmode === s.bgMode));
+    updateBgModeUI(s.bgMode);
+  }
+  updateLabels();
+}
+let firstLoad = true;
+settingsRef.on('value', snap => {
+  const s = snap.val();
+  if (firstLoad) { reflectToUI(s); firstLoad = false; }
+  if (typeof s?.rainbowSeed === 'number') rainbowSeed = s.rainbowSeed;
+});
+
+// ---------- Labels ----------
+function updateLabels() {
+  document.getElementById('diameterOut').textContent = document.getElementById('diameter').value + 'px';
+  document.getElementById('spacingXOut').textContent = document.getElementById('spacingX').value + 'px';
+  document.getElementById('spacingYOut').textContent = document.getElementById('spacingY').value + 'px';
+  document.getElementById('rowStaggerOut').textContent = parseFloat(document.getElementById('rowStagger').value).toFixed(2);
+  document.getElementById('offsetXOut').textContent = document.getElementById('offsetX').value;
+  document.getElementById('offsetYOut').textContent = document.getElementById('offsetY').value;
+  document.getElementById('pulseSpeedOut').textContent = document.getElementById('pulseSpeed').value;
+  document.getElementById('bgSpeedOut').textContent = document.getElementById('bgSpeed').value;
+  document.getElementById('glowStrengthOut').textContent = document.getElementById('glowStrength').value;
+}
+
+// ---------- Wiring ----------
+document.getElementById('displayMode').addEventListener('change', e => push({ displayMode: e.target.value }));
+document.getElementById('camFlip').addEventListener('click', () => {
+  settingsRef.child('camFacing').once('value', snap => {
+    const cur = snap.val() || 'environment';
+    push({ camFacing: cur === 'user' ? 'environment' : 'user' });
+  });
+});
+
+const mirrorColsBtn = document.getElementById('mirrorColsBtn');
+mirrorColsBtn.addEventListener('click', () => { const on = !mirrorColsBtn.classList.contains('on'); mirrorColsBtn.classList.toggle('on', on); push({ mirrorCols: on }); });
+const mirrorRowsBtn = document.getElementById('mirrorRowsBtn');
+mirrorRowsBtn.addEventListener('click', () => { const on = !mirrorRowsBtn.classList.contains('on'); mirrorRowsBtn.classList.toggle('on', on); push({ mirrorRows: on }); });
+
+['diameter','spacingX','spacingY'].forEach(id => {
+  document.getElementById(id).addEventListener('input', e => { updateLabels(); push({ [id]: parseInt(e.target.value) }); });
+});
+document.getElementById('rowStagger').addEventListener('input', e => { updateLabels(); push({ rowStagger: parseFloat(e.target.value) }); });
+document.getElementById('offsetX').addEventListener('input', e => { updateLabels(); push({ offsetX: parseInt(e.target.value) }); });
+document.getElementById('offsetY').addEventListener('input', e => { updateLabels(); push({ offsetY: parseInt(e.target.value) }); });
+document.getElementById('resetOffsetBtn').addEventListener('click', () => {
+  document.getElementById('offsetX').value = 0;
+  document.getElementById('offsetY').value = 0;
+  updateLabels();
+  push({ offsetX: 0, offsetY: 0 });
+});
+
+document.getElementById('realScreenW').addEventListener('input', e => {
+  document.getElementById('realScreenWOut').textContent = parseFloat(e.target.value).toFixed(1) + '"';
+});
+document.getElementById('realBubbleD').addEventListener('input', e => {
+  document.getElementById('realBubbleDOut').textContent = parseFloat(e.target.value).toFixed(2) + '"';
+});
+document.getElementById('applyCalcBtn').addEventListener('click', () => {
+  const screenWIn = parseFloat(document.getElementById('realScreenW').value);
+  const bubbleDIn = parseFloat(document.getElementById('realBubbleD').value);
+  const cssW = displayScreenCssW || window.innerWidth; // fallback if display hasn't reported yet
+  const pxPerInch = cssW / screenWIn;
+  const diameter = Math.max(10, Math.round(bubbleDIn * pxPerInch));
+  const spacingX = diameter;
+  const spacingY = Math.round(diameter * 0.87);
+  document.getElementById('diameter').value = diameter;
+  document.getElementById('spacingX').value = spacingX;
+  document.getElementById('spacingY').value = spacingY;
+  updateLabels();
+  push({ diameter, spacingX, spacingY });
+  if (!displayScreenCssW) alert('Heads up: the display hasn\'t reported its screen size yet, so this used this laptop\'s width as a fallback. Reload the control page once the iPhone is running for an accurate calculation.');
+});
+
+function updateColorModeUI(mode) {
+  document.getElementById('colorARow').style.display = 'flex';
+  document.getElementById('colorBRow').style.display = (mode === 'alternating') ? 'flex' : 'none';
+  document.getElementById('pulseSpeedRow').style.display = (mode === 'wave' || mode === 'ripple' || mode === 'pulse') ? 'flex' : 'none';
+  document.getElementById('shuffleRainbowRow').style.display = (mode === 'pulse') ? 'flex' : 'none';
+}
+document.querySelectorAll('[data-colormode]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-colormode]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    updateColorModeUI(btn.dataset.colormode);
+    push({ colorMode: btn.dataset.colormode });
+  });
+});
+document.getElementById('shuffleRainbowBtn').addEventListener('click', () => { rainbowSeed = Math.random() * 1000; push({ rainbowSeed }); });
+document.getElementById('colorA').addEventListener('input', e => push({ colorA: e.target.value }));
+document.getElementById('colorB').addEventListener('input', e => push({ colorB: e.target.value }));
+document.getElementById('pulseSpeed').addEventListener('input', e => { updateLabels(); push({ pulseSpeed: parseInt(e.target.value) }); });
+
+function updateBgModeUI(mode) {
+  document.getElementById('bgColorBRow').style.display = (mode === 'solid') ? 'none' : 'flex';
+  document.getElementById('bgSpeedRow').style.display = (mode === 'solid') ? 'none' : 'flex';
+}
+document.querySelectorAll('[data-bgmode]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-bgmode]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    updateBgModeUI(btn.dataset.bgmode);
+    push({ bgMode: btn.dataset.bgmode });
+  });
+});
+document.getElementById('bgColorA').addEventListener('input', e => push({ bgColorA: e.target.value }));
+document.getElementById('bgColorB').addEventListener('input', e => push({ bgColorB: e.target.value }));
+document.getElementById('bgSpeed').addEventListener('input', e => { updateLabels(); push({ bgSpeed: parseInt(e.target.value) }); });
+
+const glowEnabledBtn = document.getElementById('glowEnabledBtn');
+glowEnabledBtn.addEventListener('click', () => { const on = !glowEnabledBtn.classList.contains('on'); glowEnabledBtn.classList.toggle('on', on); push({ glowEnabled: on }); });
+document.getElementById('glowMode').addEventListener('change', e => {
+  const mode = e.target.value;
+  document.getElementById('glowColorRow').style.display = mode === 'single' ? 'flex' : 'none';
+  document.getElementById('shuffleRow').style.display = mode === 'rainbow' ? 'flex' : 'none';
+  push({ glowMode: mode });
+});
+document.getElementById('glowColor').addEventListener('input', e => push({ glowColor: e.target.value }));
+document.getElementById('glowStrength').addEventListener('input', e => { updateLabels(); push({ glowStrength: parseInt(e.target.value) }); });
+document.getElementById('shuffleColorsBtn').addEventListener('click', () => { rainbowSeed = Math.random() * 1000; push({ rainbowSeed }); });
+
+const overlayBtn = document.getElementById('overlayBtn');
+overlayBtn.addEventListener('click', () => { const on = !overlayBtn.classList.contains('on'); overlayBtn.classList.toggle('on', on); push({ overlayOn: on }); });
+
+// Tabs
+document.querySelectorAll('.tabBtn[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabBtn[data-tab]').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel[data-panel]').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelector('.panel[data-panel="' + btn.dataset.tab + '"]').classList.add('active');
+  });
+});
+
+updateLabels();
+</script>
+</body>
+</html>
