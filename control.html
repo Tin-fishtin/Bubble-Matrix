@@ -71,6 +71,7 @@
     <div class="tabBtn" data-tab="background">Background</div>
     <div class="tabBtn" data-tab="glow">Glow</div>
     <div class="tabBtn" data-tab="finish">Finish</div>
+    <div class="tabBtn" data-tab="performance">Performance</div>
   </div>
 
   <!-- SOURCE -->
@@ -86,14 +87,33 @@
       <button class="btn dim" id="camFlip">Flip camera (front/back)</button>
     </div>
     <div class="hint">The display's camera must be started once by tapping the screen directly on the iPhone — that can't be triggered remotely (iOS requires an on-device tap). This flip button works remotely once it's running.</div>
-    <div class="toggleRow" style="margin-top:12px;">
-      <label>Mirror alternating columns</label>
-      <div class="toggle on" id="mirrorColsBtn"></div>
+
+    <div class="section-label">Bubble orientation</div>
+    <div class="row">
+      <label>Orientation mode</label>
+      <select id="orientationMode">
+        <option value="flip">Flip alternating</option>
+        <option value="random">Random rotation</option>
+      </select>
     </div>
-    <div class="toggleRow">
-      <label>Mirror alternating rows too</label>
-      <div class="toggle" id="mirrorRowsBtn"></div>
+    <div id="flipControls">
+      <div class="toggleRow" style="border-top:none;">
+        <label>Mirror alternating columns</label>
+        <div class="toggle on" id="mirrorColsBtn"></div>
+      </div>
+      <div class="toggleRow">
+        <label>Mirror alternating rows too</label>
+        <div class="toggle" id="mirrorRowsBtn"></div>
+      </div>
     </div>
+    <div id="randomControls" style="display:none;">
+      <div class="hint" style="margin-bottom:8px;">Each bubble gets its own fixed random rotation, chosen once and stable until reshuffled.</div>
+      <div class="btnRow"><button class="btn dim" id="shuffleOrientationBtn">Shuffle orientations</button></div>
+    </div>
+
+    <div class="section-label">Fisheye</div>
+    <div class="row"><label for="fisheyeStrength">Lens bulge</label><input type="range" id="fisheyeStrength" min="0" max="100" value="0" step="1"><output id="fisheyeStrengthOut">0%</output></div>
+    <div class="hint">Distorts the live image inside each bubble to look like it's viewed through a small lens. This costs more performance the higher it's pushed — 0% has zero cost.</div>
   </div>
 
   <!-- GRID -->
@@ -129,7 +149,6 @@
     <div class="row" id="colorARow"><label>Color A</label><input type="color" id="colorA" value="#ffb84d"></div>
     <div class="row" id="colorBRow" style="display:none;"><label>Color B</label><input type="color" id="colorB" value="#4da3ff"></div>
     <div class="row" id="pulseSpeedRow" style="display:none;"><label for="pulseSpeed">Animation speed</label><input type="range" id="pulseSpeed" min="10" max="200" value="60" step="5"><output id="pulseSpeedOut">60</output></div>
-    <div class="btnRow" id="shuffleRainbowRow" style="display:none;"><button class="btn dim" id="shuffleRainbowBtn">Shuffle rainbow colors</button></div>
     <div class="hint">Only applies when Display mode is set to "Color pattern" under Source.</div>
   </div>
 
@@ -159,12 +178,26 @@
     </div>
     <div class="row" id="glowColorRow"><label>Glow color</label><input type="color" id="glowColor" value="#ffb84d"></div>
     <div class="btnRow" id="shuffleRow" style="display:none;"><button class="btn dim" id="shuffleColorsBtn">Shuffle colors</button></div>
-    <div class="row" style="margin-top:6px;"><label for="glowStrength">Glow strength</label><input type="range" id="glowStrength" min="4" max="60" value="18" step="1"><output id="glowStrengthOut">18</output></div>
+    <div class="row" style="margin-top:6px;"><label for="glowStrength">Glow reach</label><input type="range" id="glowStrength" min="4" max="80" value="18" step="1"><output id="glowStrengthOut">18</output></div>
+    <div class="hint" style="margin-top:-6px; margin-bottom:10px;">How far the glow spreads beyond each bubble's edge.</div>
+    <div class="row"><label for="glowIntensity">Glow intensity</label><input type="range" id="glowIntensity" min="5" max="100" value="40" step="1"><output id="glowIntensityOut">40%</output></div>
+    <div class="hint" style="margin-top:-6px;">How bright the glow gets at its peak. Keep this low for a subtle effect — pushing both reach and intensity high at once will make neighboring bubbles' glow overlap and wash out the background.</div>
   </div>
 
   <!-- FINISH -->
   <div class="panel" data-panel="finish">
     <div class="toggleRow" style="border-top:none;"><label>Simulate bubble wrap sheen</label><div class="toggle on" id="overlayBtn"></div></div>
+  </div>
+
+  <!-- PERFORMANCE -->
+  <div class="panel" data-panel="performance">
+    <div class="section-label">Rendering</div>
+    <div class="row"><label for="renderScale">Render resolution</label><input type="range" id="renderScale" min="1" max="2" value="1.5" step="0.1"><output id="renderScaleOut">1.5×</output></div>
+    <div class="hint" style="margin-top:-6px; margin-bottom:10px;">Lower = blurrier but faster. 2× matches the iPhone 6's real pixel density; 1–1.5× trades some sharpness for noticeably less lag.</div>
+    <div class="row"><label for="maxFps">Max frame rate</label><input type="range" id="maxFps" min="10" max="60" value="30" step="5"><output id="maxFpsOut">30fps</output></div>
+    <div class="hint">This display's animation and camera redraw are capped at this rate. Lower it if things still feel laggy — 24–30fps is usually indistinguishable from 60fps for this kind of ambient piece, and is much easier on the hardware.</div>
+    <div class="section-label">Live diagnostics</div>
+    <div id="perfInfo" class="hint">Waiting for display to report in…</div>
   </div>
 </div>
 
@@ -172,11 +205,13 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
 <script>
 // =========================================================================
-// PASTE YOUR FIREBASE CONFIG HERE — same object goes in display.html too.
+// PASTE YOUR FIREBASE CONFIG HERE — same object goes in display.html too
+// (as just the databaseURL field there).
 // =========================================================================
 const firebaseConfig = {
   apiKey: "AIzaSyBmH9Gxq7RW-O-tcfU3TeXoHlD6_vEom-w",
   authDomain: "bubble-matrix.firebaseapp.com",
+  databaseURL: "https://bubble-matrix-default-rtdb.firebaseio.com/",
   projectId: "bubble-matrix",
   storageBucket: "bubble-matrix.firebasestorage.app",
   messagingSenderId: "965325185020",
@@ -188,6 +223,7 @@ const settingsRef = db.ref('bubbleMatrix/settings');
 const statusRef = db.ref('bubbleMatrix/status');
 
 let rainbowSeed = Math.random() * 1000;
+let orientationSeed = Math.random() * 1000;
 let displayScreenCssW = null;
 
 // Push a partial update — merges into whatever's already stored.
@@ -199,6 +235,7 @@ function push(partial) {
 statusRef.on('value', snap => {
   const s = snap.val();
   const el = document.getElementById('statusLine');
+  const perfEl = document.getElementById('perfInfo');
   if (!s || !s.lastSeen) {
     el.innerHTML = '<span class="bad">●</span> No display has reported in yet.';
     return;
@@ -211,6 +248,7 @@ statusRef.on('value', snap => {
     displayScreenCssW = s.cssWidth;
     document.getElementById('displayScreenInfo').textContent =
       `Display screen size: ${s.cssWidth} × ${s.cssHeight} CSS px (reported ${Math.round(secsAgo)}s ago)`;
+    perfEl.textContent = `Device pixel ratio: ${s.dpr} · Reported screen: ${s.cssWidth}×${s.cssHeight} · Last check-in: ${Math.round(secsAgo)}s ago`;
   }
 });
 
@@ -224,8 +262,15 @@ function reflectToUI(s) {
   if (typeof s.rowStagger === 'number') document.getElementById('rowStagger').value = s.rowStagger;
   if (typeof s.offsetX === 'number') document.getElementById('offsetX').value = s.offsetX;
   if (typeof s.offsetY === 'number') document.getElementById('offsetY').value = s.offsetY;
+  if (s.orientationMode) {
+    document.getElementById('orientationMode').value = s.orientationMode;
+    updateOrientationUI(s.orientationMode);
+  }
   if (typeof s.mirrorCols === 'boolean') document.getElementById('mirrorColsBtn').classList.toggle('on', s.mirrorCols);
   if (typeof s.mirrorRows === 'boolean') document.getElementById('mirrorRowsBtn').classList.toggle('on', s.mirrorRows);
+  if (typeof s.fisheyeStrength === 'number') {
+    document.getElementById('fisheyeStrength').value = Math.round(s.fisheyeStrength * 100);
+  }
   if (s.colorA) document.getElementById('colorA').value = s.colorA;
   if (s.colorB) document.getElementById('colorB').value = s.colorB;
   if (typeof s.pulseSpeed === 'number') document.getElementById('pulseSpeed').value = s.pulseSpeed;
@@ -233,10 +278,13 @@ function reflectToUI(s) {
   if (s.glowMode) document.getElementById('glowMode').value = s.glowMode;
   if (s.glowColor) document.getElementById('glowColor').value = s.glowColor;
   if (typeof s.glowStrength === 'number') document.getElementById('glowStrength').value = s.glowStrength;
+  if (typeof s.glowIntensity === 'number') document.getElementById('glowIntensity').value = Math.round(s.glowIntensity * 100);
   if (typeof s.overlayOn === 'boolean') document.getElementById('overlayBtn').classList.toggle('on', s.overlayOn);
   if (s.bgColorA) document.getElementById('bgColorA').value = s.bgColorA;
   if (s.bgColorB) document.getElementById('bgColorB').value = s.bgColorB;
   if (typeof s.bgSpeed === 'number') document.getElementById('bgSpeed').value = s.bgSpeed;
+  if (typeof s.renderScale === 'number') document.getElementById('renderScale').value = s.renderScale;
+  if (typeof s.maxFps === 'number') document.getElementById('maxFps').value = s.maxFps;
   if (s.colorMode) {
     document.querySelectorAll('[data-colormode]').forEach(b => b.classList.toggle('active', b.dataset.colormode === s.colorMode));
     updateColorModeUI(s.colorMode);
@@ -245,6 +293,9 @@ function reflectToUI(s) {
     document.querySelectorAll('[data-bgmode]').forEach(b => b.classList.toggle('active', b.dataset.bgmode === s.bgMode));
     updateBgModeUI(s.bgMode);
   }
+  const glowModeSel = document.getElementById('glowMode');
+  document.getElementById('glowColorRow').style.display = glowModeSel.value === 'single' ? 'flex' : 'none';
+  document.getElementById('shuffleRow').style.display = glowModeSel.value === 'rainbow' ? 'flex' : 'none';
   updateLabels();
 }
 let firstLoad = true;
@@ -252,6 +303,7 @@ settingsRef.on('value', snap => {
   const s = snap.val();
   if (firstLoad) { reflectToUI(s); firstLoad = false; }
   if (typeof s?.rainbowSeed === 'number') rainbowSeed = s.rainbowSeed;
+  if (typeof s?.orientationSeed === 'number') orientationSeed = s.orientationSeed;
 });
 
 // ---------- Labels ----------
@@ -265,6 +317,10 @@ function updateLabels() {
   document.getElementById('pulseSpeedOut').textContent = document.getElementById('pulseSpeed').value;
   document.getElementById('bgSpeedOut').textContent = document.getElementById('bgSpeed').value;
   document.getElementById('glowStrengthOut').textContent = document.getElementById('glowStrength').value;
+  document.getElementById('glowIntensityOut').textContent = document.getElementById('glowIntensity').value + '%';
+  document.getElementById('fisheyeStrengthOut').textContent = document.getElementById('fisheyeStrength').value + '%';
+  document.getElementById('renderScaleOut').textContent = parseFloat(document.getElementById('renderScale').value).toFixed(1) + '×';
+  document.getElementById('maxFpsOut').textContent = document.getElementById('maxFps').value + 'fps';
 }
 
 // ---------- Wiring ----------
@@ -276,10 +332,25 @@ document.getElementById('camFlip').addEventListener('click', () => {
   });
 });
 
+function updateOrientationUI(mode) {
+  document.getElementById('flipControls').style.display = mode === 'flip' ? 'block' : 'none';
+  document.getElementById('randomControls').style.display = mode === 'random' ? 'block' : 'none';
+}
+document.getElementById('orientationMode').addEventListener('change', e => {
+  updateOrientationUI(e.target.value);
+  push({ orientationMode: e.target.value });
+});
+document.getElementById('shuffleOrientationBtn').addEventListener('click', () => {
+  orientationSeed = Math.random() * 1000;
+  push({ orientationSeed });
+});
+
 const mirrorColsBtn = document.getElementById('mirrorColsBtn');
 mirrorColsBtn.addEventListener('click', () => { const on = !mirrorColsBtn.classList.contains('on'); mirrorColsBtn.classList.toggle('on', on); push({ mirrorCols: on }); });
 const mirrorRowsBtn = document.getElementById('mirrorRowsBtn');
 mirrorRowsBtn.addEventListener('click', () => { const on = !mirrorRowsBtn.classList.contains('on'); mirrorRowsBtn.classList.toggle('on', on); push({ mirrorRows: on }); });
+
+document.getElementById('fisheyeStrength').addEventListener('input', e => { updateLabels(); push({ fisheyeStrength: parseInt(e.target.value) / 100 }); });
 
 ['diameter','spacingX','spacingY'].forEach(id => {
   document.getElementById(id).addEventListener('input', e => { updateLabels(); push({ [id]: parseInt(e.target.value) }); });
@@ -303,7 +374,7 @@ document.getElementById('realBubbleD').addEventListener('input', e => {
 document.getElementById('applyCalcBtn').addEventListener('click', () => {
   const screenWIn = parseFloat(document.getElementById('realScreenW').value);
   const bubbleDIn = parseFloat(document.getElementById('realBubbleD').value);
-  const cssW = displayScreenCssW || window.innerWidth; // fallback if display hasn't reported yet
+  const cssW = displayScreenCssW || window.innerWidth;
   const pxPerInch = cssW / screenWIn;
   const diameter = Math.max(10, Math.round(bubbleDIn * pxPerInch));
   const spacingX = diameter;
@@ -320,7 +391,6 @@ function updateColorModeUI(mode) {
   document.getElementById('colorARow').style.display = 'flex';
   document.getElementById('colorBRow').style.display = (mode === 'alternating') ? 'flex' : 'none';
   document.getElementById('pulseSpeedRow').style.display = (mode === 'wave' || mode === 'ripple' || mode === 'pulse') ? 'flex' : 'none';
-  document.getElementById('shuffleRainbowRow').style.display = (mode === 'pulse') ? 'flex' : 'none';
 }
 document.querySelectorAll('[data-colormode]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -330,7 +400,6 @@ document.querySelectorAll('[data-colormode]').forEach(btn => {
     push({ colorMode: btn.dataset.colormode });
   });
 });
-document.getElementById('shuffleRainbowBtn').addEventListener('click', () => { rainbowSeed = Math.random() * 1000; push({ rainbowSeed }); });
 document.getElementById('colorA').addEventListener('input', e => push({ colorA: e.target.value }));
 document.getElementById('colorB').addEventListener('input', e => push({ colorB: e.target.value }));
 document.getElementById('pulseSpeed').addEventListener('input', e => { updateLabels(); push({ pulseSpeed: parseInt(e.target.value) }); });
@@ -361,10 +430,14 @@ document.getElementById('glowMode').addEventListener('change', e => {
 });
 document.getElementById('glowColor').addEventListener('input', e => push({ glowColor: e.target.value }));
 document.getElementById('glowStrength').addEventListener('input', e => { updateLabels(); push({ glowStrength: parseInt(e.target.value) }); });
+document.getElementById('glowIntensity').addEventListener('input', e => { updateLabels(); push({ glowIntensity: parseInt(e.target.value) / 100 }); });
 document.getElementById('shuffleColorsBtn').addEventListener('click', () => { rainbowSeed = Math.random() * 1000; push({ rainbowSeed }); });
 
 const overlayBtn = document.getElementById('overlayBtn');
 overlayBtn.addEventListener('click', () => { const on = !overlayBtn.classList.contains('on'); overlayBtn.classList.toggle('on', on); push({ overlayOn: on }); });
+
+document.getElementById('renderScale').addEventListener('input', e => { updateLabels(); push({ renderScale: parseFloat(e.target.value) }); });
+document.getElementById('maxFps').addEventListener('input', e => { updateLabels(); push({ maxFps: parseInt(e.target.value) }); });
 
 // Tabs
 document.querySelectorAll('.tabBtn[data-tab]').forEach(btn => {

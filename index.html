@@ -94,11 +94,15 @@ const camVideo = document.getElementById('camVideo');
 // ---------- Defaults (used until/unless Firebase has something) ----------
 let displayMode = 'camera';
 let diameter = 70, spacingX = 80, spacingY = 72, rowStagger = 0.5, offsetX = 0, offsetY = 0;
+let orientationMode = 'flip'; // 'flip' | 'random'
 let mirrorCols = true, mirrorRows = false, camFacing = 'environment';
+let orientationSeed = 0;
+let fisheyeStrength = 0; // 0 = off, up to 1 = strong bulge
 let colorMode = 'solid', colorA = '#ffb84d', colorB = '#4da3ff', pulseSpeed = 60;
-let glowEnabled = false, glowMode = 'single', glowColor = '#ffb84d', glowStrength = 18, rainbowSeed = 0;
+let glowEnabled = false, glowMode = 'single', glowColor = '#ffb84d', glowStrength = 18, glowIntensity = 0.4, rainbowSeed = 0;
 let overlayOn = true, bgMode = 'solid', bgColorA = '#000000', bgColorB = '#1a1a2e', bgSpeed = 60;
-let t = 0, lastTime = performance.now();
+let renderScale = 1.5, maxFps = 30;
+let t = 0, lastFrameTime = performance.now();
 let camActive = false, camStream = null;
 
 function applySettings(s) {
@@ -110,8 +114,11 @@ function applySettings(s) {
   if (typeof s.rowStagger === 'number') rowStagger = s.rowStagger;
   if (typeof s.offsetX === 'number') offsetX = s.offsetX;
   if (typeof s.offsetY === 'number') offsetY = s.offsetY;
+  if (s.orientationMode) orientationMode = s.orientationMode;
   if (typeof s.mirrorCols === 'boolean') mirrorCols = s.mirrorCols;
   if (typeof s.mirrorRows === 'boolean') mirrorRows = s.mirrorRows;
+  if (typeof s.orientationSeed === 'number') orientationSeed = s.orientationSeed;
+  if (typeof s.fisheyeStrength === 'number') fisheyeStrength = s.fisheyeStrength;
   if (s.colorMode) colorMode = s.colorMode;
   if (s.colorA) colorA = s.colorA;
   if (s.colorB) colorB = s.colorB;
@@ -120,12 +127,19 @@ function applySettings(s) {
   if (s.glowMode) glowMode = s.glowMode;
   if (s.glowColor) glowColor = s.glowColor;
   if (typeof s.glowStrength === 'number') glowStrength = s.glowStrength;
+  if (typeof s.glowIntensity === 'number') glowIntensity = s.glowIntensity;
   if (typeof s.rainbowSeed === 'number') rainbowSeed = s.rainbowSeed;
   if (typeof s.overlayOn === 'boolean') overlayOn = s.overlayOn;
   if (s.bgMode) bgMode = s.bgMode;
   if (s.bgColorA) bgColorA = s.bgColorA;
   if (s.bgColorB) bgColorB = s.bgColorB;
   if (typeof s.bgSpeed === 'number') bgSpeed = s.bgSpeed;
+  if (typeof s.maxFps === 'number') maxFps = s.maxFps;
+
+  if (typeof s.renderScale === 'number' && s.renderScale !== renderScale) {
+    renderScale = s.renderScale;
+    resize();
+  }
 
   // camFacing changing means we need to restart the stream with the new
   // facing mode — but only if the camera is already running.
@@ -151,8 +165,10 @@ setInterval(pollSettings, 800);
 async function startCamera() {
   try {
     if (camStream) camStream.getTracks().forEach(tr => tr.stop());
+    // Cap the requested resolution — bubbles only ever show a small cropped
+    // circle of this, so decoding a huge frame just burns CPU for nothing.
     camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: camFacing },
+      video: { facingMode: camFacing, width: { ideal: 640 }, height: { ideal: 640 } },
       audio: false
     });
     camVideo.srcObject = camStream;
@@ -198,16 +214,16 @@ document.getElementById('recallZone').addEventListener('click', () => {
 
 // ---------- Sizing ----------
 function resize() {
-  const dpr = 2;
-  canvas.width = Math.round(window.innerWidth * dpr);
-  canvas.height = Math.round(window.innerHeight * dpr);
+  canvas.width = Math.round(window.innerWidth * renderScale);
+  canvas.height = Math.round(window.innerHeight * renderScale);
   reportStatus();
 }
 window.addEventListener('resize', resize);
 
 // ---------- Deterministic per-cell randomness ----------
-function hash2(a, b) {
-  const n = Math.sin(a * 127.1 + b * 311.7 + rainbowSeed * 0.017) * 43758.5453;
+function hash2(a, b, seed) {
+  const s = (seed === undefined) ? rainbowSeed : seed;
+  const n = Math.sin(a * 127.1 + b * 311.7 + s * 0.017) * 43758.5453;
   return n - Math.floor(n);
 }
 
@@ -286,9 +302,143 @@ function drawBackground(cssW, cssH) {
   }
 }
 
+// =========================================================================
+// SPRITE CACHE — the single biggest performance change from before.
+// Previously every bubble created a brand-new canvas gradient every single
+// frame for its vignette and its glow. Gradient creation is expensive, and
+// multiplying that by 100+ bubbles at 60fps was the main source of lag.
+// Instead we pre-render each effect ONCE into a small offscreen bitmap
+// ("sprite") whenever the relevant settings change, and every frame just
+// stamps that bitmap in place with drawImage — which is cheap.
+// =========================================================================
+let vignetteSprite = null, vignetteSpriteKey = '';
+function getVignetteSprite(radius) {
+  const key = radius.toFixed(1);
+  if (vignetteSprite && vignetteSpriteKey === key) return vignetteSprite;
+  const size = Math.ceil(radius * 2) + 2;
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const octx = off.getContext('2d');
+  const c = size / 2;
+  const grad = octx.createRadialGradient(c, c, radius * 0.3, c, c, radius);
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.35)');
+  octx.beginPath();
+  octx.arc(c, c, radius, 0, Math.PI * 2);
+  octx.fillStyle = grad;
+  octx.fill();
+  vignetteSprite = { canvas: off, size };
+  vignetteSpriteKey = key;
+  return vignetteSprite;
+}
+
+// Glow sprites: one for 'single' mode, up to 24 (quantized by hue) for
+// 'rainbow' mode. Regenerated only when reach/intensity/radius/color change.
+let glowSpriteCache = { key: '', single: null, rainbow: null };
+const GLOW_HUE_BUCKETS = 24;
+function renderGlowSprite(rgbString, outerR, radius, intensity) {
+  const size = Math.ceil(outerR * 2) + 2;
+  const off = document.createElement('canvas');
+  off.width = size; off.height = size;
+  const octx = off.getContext('2d');
+  const c = size / 2;
+  const grad = octx.createRadialGradient(c, c, radius * 0.92, c, c, outerR);
+  grad.addColorStop(0, `rgba(${rgbString},0)`);
+  grad.addColorStop(0.45, `rgba(${rgbString},${intensity})`);
+  grad.addColorStop(1, `rgba(${rgbString},0)`);
+  octx.beginPath();
+  octx.arc(c, c, outerR, 0, Math.PI * 2);
+  octx.fillStyle = grad;
+  octx.fill();
+  return { canvas: off, size };
+}
+function getGlowSprites(radius) {
+  const outerR = radius + Math.max(2, glowStrength);
+  const key = [radius.toFixed(1), outerR.toFixed(1), glowIntensity.toFixed(2), glowMode, glowColor].join('|');
+  if (glowSpriteCache.key === key) return glowSpriteCache;
+  if (glowMode === 'rainbow') {
+    const sprites = [];
+    for (let i = 0; i < GLOW_HUE_BUCKETS; i++) {
+      const hue = Math.round((i / GLOW_HUE_BUCKETS) * 360);
+      sprites.push(renderGlowSprite(hslToRgbString(hue, 90, 62), outerR, radius, glowIntensity));
+    }
+    glowSpriteCache = { key, single: null, rainbow: sprites, outerR };
+  } else {
+    const single = renderGlowSprite(hexOrNamedToRgb(glowColor), outerR, radius, glowIntensity);
+    glowSpriteCache = { key, single, rainbow: null, outerR };
+  }
+  return glowSpriteCache;
+}
+function hslToRgbString(h, s, l) {
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return `${Math.round(f(0) * 255)},${Math.round(f(8) * 255)},${Math.round(f(4) * 255)}`;
+}
+
 // ---------- Drawing ----------
+function drawCameraCell(cx, cy, col, row, radius, srcOffX, srcOffY, srcSize) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.translate(cx, cy);
+
+  const baseFlip = (camFacing === 'user') ? -1 : 1;
+
+  if (orientationMode === 'random') {
+    const angle = hash2(col * 7 + 3, row * 11 + 5, orientationSeed) * Math.PI * 2;
+    ctx.rotate(angle);
+    ctx.scale(baseFlip, 1);
+  } else {
+    const colFlip = (mirrorCols && (((col % 2) + 2) % 2 === 1)) ? -1 : 1;
+    const rowFlip = (mirrorRows && (((row % 2) + 2) % 2 === 1)) ? -1 : 1;
+    ctx.scale(baseFlip * colFlip, rowFlip);
+  }
+
+  if (fisheyeStrength <= 0.001) {
+    // Fast path — one draw call, used whenever fisheye is off (the default).
+    ctx.drawImage(camVideo, srcOffX, srcOffY, srcSize, srcSize, -radius, -radius, radius * 2, radius * 2);
+  } else {
+    // Fisheye path — approximate a lens bulge with a handful of concentric
+    // rings, each uniformly rescaled a little differently. This is a cheap
+    // stand-in for true per-pixel warping, which would be far too slow to
+    // run for 100+ live bubbles on this hardware. Ring count scales with
+    // bubble size so small bubbles (the common case) stay cheap.
+    const ringCount = Math.max(3, Math.min(8, Math.round(radius / 9)));
+    const p = 1 + fisheyeStrength * 3.5; // distortion curve exponent
+    for (let i = 0; i < ringCount; i++) {
+      const destTOuter = (i + 1) / ringCount;
+      const destTInner = i / ringCount;
+      const destROuter = destTOuter * radius;
+      const destRInner = destTInner * radius;
+      const srcTOuter = Math.pow(destTOuter, p);
+      const srcROuter = srcTOuter * (srcSize / 2);
+      const scale = destROuter / srcROuter;
+
+      ctx.save();
+      const ringPath = new Path2D();
+      ringPath.arc(0, 0, destROuter, 0, Math.PI * 2);
+      if (destRInner > 0.5) {
+        ringPath.moveTo(destRInner, 0);
+        ringPath.arc(0, 0, destRInner, 0, Math.PI * 2, true);
+      }
+      ctx.clip(ringPath, 'evenodd');
+      ctx.scale(scale, scale);
+      ctx.drawImage(camVideo, srcOffX, srcOffY, srcSize, srcSize, -srcSize / 2, -srcSize / 2, srcSize, srcSize);
+      ctx.restore();
+    }
+  }
+
+  ctx.restore(); // undo clip/translate/rotate/scale
+
+  const vign = getVignetteSprite(radius);
+  ctx.drawImage(vign.canvas, cx - vign.size / 2, cy - vign.size / 2);
+}
+
 function render() {
-  const dpr = 2;
+  const dpr = renderScale;
   const cssW = window.innerWidth;
   const cssH = window.innerHeight;
 
@@ -310,13 +460,9 @@ function render() {
     srcOffY = (vh - srcSize) / 2;
   }
 
-  function glowColorFor(col, row) {
-    if (glowMode === 'rainbow') {
-      const hue = Math.floor(hash2(col, row) * 360);
-      return `hsl(${hue}, 90%, 62%)`;
-    }
-    return glowColor;
-  }
+  // Batch the plain thin outline into ONE path + ONE stroke call instead of
+  // one stroke per bubble — far cheaper than N separate draw calls.
+  const outlinePath = (!glowEnabled) ? new Path2D() : null;
 
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
@@ -324,25 +470,7 @@ function render() {
 
     if (displayMode === 'camera') {
       if (camReady) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.translate(cx, cy);
-        const baseFlip = (camFacing === 'user') ? -1 : 1;
-        const colFlip = (mirrorCols && (((col % 2) + 2) % 2 === 1)) ? -1 : 1;
-        const rowFlip = (mirrorRows && (((row % 2) + 2) % 2 === 1)) ? -1 : 1;
-        ctx.scale(baseFlip * colFlip, rowFlip);
-        ctx.drawImage(camVideo, srcOffX, srcOffY, srcSize, srcSize, -radius, -radius, radius * 2, radius * 2);
-        ctx.restore();
-
-        const vign = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius);
-        vign.addColorStop(0, 'rgba(0,0,0,0)');
-        vign.addColorStop(1, 'rgba(0,0,0,0.35)');
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fillStyle = vign;
-        ctx.fill();
+        drawCameraCell(cx, cy, col, row, radius, srcOffX, srcOffY, srcSize);
       } else {
         const phase = (col * 0.4) - t * 1.4 + row * 0.3;
         const b = Math.max(0, Math.sin(phase)) * 0.12;
@@ -381,36 +509,33 @@ function render() {
       ctx.globalAlpha = 1;
     }
 
-    if (!glowEnabled) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * 1.01, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+    if (outlinePath) {
+      outlinePath.moveTo(cx + radius * 1.01, cy);
+      outlinePath.arc(cx, cy, radius * 1.01, 0, Math.PI * 2);
     }
+  }
+
+  if (outlinePath) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    ctx.stroke(outlinePath);
   }
 
   if (glowEnabled) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const outerR = radius + Math.min(glowStrength, radius * 1.4);
+    const sprites = getGlowSprites(radius);
     for (let i = 0; i < cells.length; i++) {
       const cell = cells[i];
-      const gColor = glowColorFor(cell.col, cell.row);
-      const rgb = hexOrNamedToRgb(gColor);
-      const grad = ctx.createRadialGradient(cell.cx, cell.cy, radius * 0.88, cell.cx, cell.cy, outerR);
-      grad.addColorStop(0, `rgba(${rgb},0)`);
-      grad.addColorStop(0.28, `rgba(${rgb},0.95)`);
-      grad.addColorStop(1, `rgba(${rgb},0)`);
-      ctx.beginPath();
-      ctx.arc(cell.cx, cell.cy, outerR, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(cell.cx, cell.cy, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(${rgb},0.9)`;
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      let sprite;
+      if (glowMode === 'rainbow') {
+        const hue = Math.floor(hash2(cell.col, cell.row) * 360);
+        const idx = Math.min(GLOW_HUE_BUCKETS - 1, Math.floor((hue / 360) * GLOW_HUE_BUCKETS));
+        sprite = sprites.rainbow[idx];
+      } else {
+        sprite = sprites.single;
+      }
+      ctx.drawImage(sprite.canvas, cell.cx - sprite.size / 2, cell.cy - sprite.size / 2);
     }
     ctx.restore();
   }
@@ -428,8 +553,13 @@ function render() {
 }
 
 function loop(now) {
-  const dt = (now - lastTime) / 1000;
-  lastTime = now;
+  const frameInterval = maxFps > 0 ? 1000 / maxFps : 0;
+  if (frameInterval > 0 && now - lastFrameTime < frameInterval) {
+    requestAnimationFrame(loop);
+    return;
+  }
+  const dt = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
   t += dt;
   render();
   requestAnimationFrame(loop);
