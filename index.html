@@ -84,7 +84,7 @@
 // config, e.g. "https://your-project-default-rtdb.firebaseio.com"
 // (no trailing slash)
 // =========================================================================
-const FIREBASE_DB_URL = "https://bubble-matrix-default-rtdb.firebaseio.com/";
+const FIREBASE_DB_URL = "PASTE_ME";
 
 
 const canvas = document.getElementById('canvas');
@@ -168,7 +168,7 @@ async function startCamera() {
     // Cap the requested resolution — bubbles only ever show a small cropped
     // circle of this, so decoding a huge frame just burns CPU for nothing.
     camStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: camFacing, width: { ideal: 640 }, height: { ideal: 640 } },
+      video: { facingMode: camFacing, width: { ideal: 720 } },
       audio: false
     });
     camVideo.srcObject = camStream;
